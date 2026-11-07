@@ -32,7 +32,7 @@
 </section>
 
 <div class="page-body">
-  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#authn-authz">認証と認可</a></li><li><a href="#why-oauth">OAuth が解決する問題</a></li><li><a href="#actors">登場人物</a></li><li><a href="#map">このノートの進め方</a></li><li><a href="#summary">まとめ</a></li></ul></aside>
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#authn-authz">認証と認可</a></li><li><a href="#why-oauth">OAuth が解決する問題</a></li><li><a href="#actors">登場人物</a><ul><li><a href="#names">仕様ごとの呼び名</a></li><li><a href="#confusing">混同しやすい概念</a></li></ul></li><li><a href="#map">このノートの進め方</a></li><li><a href="#summary">まとめ</a></li></ul></aside>
   <main class="content">
 <article>
 <p>OAuth 2.0 は<strong>認可</strong>、OpenID Connect（OIDC）は<strong>認証</strong>の仕様である。SPA から Web API を呼ぶ構成では、OIDC でユーザーを確かめ、OAuth 2.0 のアクセストークンで API を呼ぶ。</p>
@@ -102,7 +102,50 @@
 <tr><td>Resource Server</td><td>Web API</td><td>トークンを検証し、リソースを返す</td></tr>
 </tbody>
 </table>
-<p>OIDC では認可サーバーを <strong>OpenID Provider（OP）</strong>、クライアントを <strong>Relying Party（RP）</strong> と呼ぶ。一般には IdP（Identity Provider）とも呼ぶ。</p>
+<h3 id="names">仕様ごとの呼び名</h3>
+<p>同じものを、OAuth 2.0 と OIDC では別の名前で呼ぶ。実体は同じである。</p>
+<table>
+<thead><tr><th>OAuth 2.0</th><th>OpenID Connect</th><th>一般的な呼び方</th><th>具体例</th></tr></thead>
+<tbody>
+<tr><td>Authorization Server（認可サーバー）</td><td><strong>OpenID Provider（OP）</strong></td><td><strong>IdP</strong>（Identity Provider）</td><td>Keycloak、Auth0、Entra ID</td></tr>
+<tr><td>Client（クライアント）</td><td><strong>Relying Party（RP）</strong></td><td>—</td><td>SPA、BFF</td></tr>
+<tr><td>Resource Owner</td><td><strong>End-User</strong></td><td>ユーザー</td><td>—</td></tr>
+<tr><td>Resource Server</td><td>（該当なし）</td><td>API</td><td>Web API</td></tr>
+</tbody>
+</table>
+<ul>
+<li><strong>OP</strong>: ユーザーを認証し、ID トークンを発行する。OIDC に対応した認可サーバーのことである</li>
+<li><strong>RP</strong>: OP の認証結果を信頼して（rely）ユーザーをログインさせる側。クライアントのことである</li>
+<li><strong>IdP</strong>: 仕様の用語ではなく、SAML なども含めた一般的な呼び方である</li>
+</ul>
+
+<h3 id="confusing">混同しやすい概念</h3>
+<h4>認証サーバーと認可サーバー</h4>
+<p>OAuth 2.0 には「認証サーバー」という役割はない。ユーザーの認証は認可サーバーの内部で行われ、その方法（パスワード、MFA、パスキーなど）は仕様の範囲外である。</p>
+<h4>フェデレーション（IdP ブローカー）</h4>
+<p>認可サーバーが、ユーザーの認証をさらに外部の IdP に任せる構成である。たとえば Keycloak が「Google でログイン」を中継すると、Keycloak は<strong>アプリに対しては OP、Google に対しては RP</strong> になる。</p>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 150" role="img" aria-label="フェデレーションでは中継する認可サーバーが OP と RP を兼ねる">
+  <defs><marker id="fed-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <rect class="xp-box" x="20" y="30" width="200" height="60" rx="10"/>
+  <text class="xp-text" x="120" y="65" text-anchor="middle">アプリ（SPA / BFF）</text>
+  <text class="xp-small" x="120" y="114" text-anchor="middle">RP</text>
+  <rect class="xp-hot" x="280" y="30" width="200" height="60" rx="10"/>
+  <text class="xp-text" x="380" y="65" text-anchor="middle">Keycloak</text>
+  <text class="xp-accent" x="380" y="114" text-anchor="middle">アプリに対して OP</text>
+  <text class="xp-accent" x="380" y="134" text-anchor="middle">Google に対して RP</text>
+  <rect class="xp-box" x="540" y="30" width="200" height="60" rx="10"/>
+  <text class="xp-text" x="640" y="65" text-anchor="middle">Google</text>
+  <text class="xp-small" x="640" y="114" text-anchor="middle">OP（外部 IdP）</text>
+  <path class="xp-line" d="M220 60H278" marker-end="url(#fed-arrow)"/>
+  <text class="xp-small" x="249" y="50" text-anchor="middle">OIDC</text>
+  <path class="xp-line" d="M480 60H538" marker-end="url(#fed-arrow)"/>
+  <text class="xp-small" x="509" y="50" text-anchor="middle">OIDC</text>
+</svg>
+<figcaption>アプリは Keycloak だけを知っていればよい。Google の ID トークンは Keycloak が検証し、アプリには Keycloak が発行したトークンが渡る。</figcaption>
+</figure>
+<h4>リソースサーバーと認可サーバーの同居</h4>
+<p>RFC 6749 は、認可サーバーとリソースサーバーが同じサーバーでもよいとしている。小規模な構成ではよくある形だが、役割は別のものとして考える。</p>
 
 <h2 id="map">このノートの進め方</h2>
 <table>
@@ -123,6 +166,7 @@
 <li>認証は「誰か」、認可は「何を許すか」。OIDC が認証、OAuth 2.0 が認可を担う</li>
 <li>OAuth 2.0 の目的は、パスワードを渡さずに、範囲と期限を限った権限を渡すことである</li>
 <li>登場人物は Resource Owner、Client、Authorization Server、Resource Server の 4 つ</li>
+<li>OIDC では認可サーバーを OP、クライアントを RP と呼ぶ。フェデレーションでは中継する認可サーバーが OP と RP を兼ねる</li>
 </ul>
 </article>
   </main>
