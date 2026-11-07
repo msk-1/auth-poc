@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 認可コードフロー + PKCE — OAuth 2.0 / OpenID Connect 入門</title>
+<meta name="description" content="認可コードフローは、ブラウザ経由では使い捨ての認可コードだけを渡し、トークンは直接通信で受け取る。PKCE は、横取りされた認可コードを攻撃者がトークンに交換できないようにする。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&amp;family=Noto+Sans+JP:wght@300;400;500;700&amp;display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body data-root="../" data-page="chapters/02-auth-code-pkce.html">
+<header class="site-header">
+  <a class="brand" href="../index.html">oauth<span>/</span>oidc notes</a>
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" aria-label="配色を切り替える"></button>
+    <button class="menu-toggle" type="button" aria-label="章の一覧を開く" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+  </div>
+</header>
+<div class="menu-overlay" id="menu"><nav class="menu-list" aria-label="章の一覧"></nav></div>
+
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="eyebrow">Chapter 02</p>
+    <h1>認可コードフロー + PKCE</h1>
+    <p class="sub">コードはブラウザ経由、トークンは直接</p>
+  </div>
+  <svg class="hero-arrow" viewBox="0 0 44 64" aria-hidden="true"><path d="M22 0v62M2 42l20 20 20-20"/></svg>
+</section>
+
+<div class="page-body">
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#sequence">流れの全体</a></li><li><a href="#step1">1. PKCE の値を作る</a></li><li><a href="#step2">2. 認可リクエスト</a></li><li><a href="#step4">3. コールバック</a></li><li><a href="#step5">4. トークンリクエスト</a></li><li><a href="#why-pkce">PKCE が防ぐもの</a></li><li><a href="#params">パラメータと防ぐ攻撃</a></li><li><a href="#refresh">リフレッシュ</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <main class="content">
+<article>
+<p>認可コードフローは、ブラウザ経由では<strong>使い捨ての認可コード</strong>だけを渡し、トークンは<strong>直接通信</strong>で受け取る。PKCE は、横取りされた認可コードを攻撃者がトークンに交換できないようにする。</p>
+
+<h2 id="sequence">流れの全体</h2>
+<p>SPA が自分でフローを回す場合（<a href="04-spa-patterns.html">04 章</a>の C 方式）で示す。BFF 方式では、SPA の位置に BFF が入る。</p>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 620" role="img" aria-label="認可コードフロー + PKCE のシーケンス">
+  <defs><marker id="seq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <rect class="xp-hot" x="40" y="20" width="160" height="44" rx="10"/>
+  <text class="xp-text" x="120" y="47" text-anchor="middle">SPA（クライアント）</text>
+  <rect class="xp-box" x="320" y="20" width="160" height="44" rx="10"/>
+  <text class="xp-text" x="400" y="47" text-anchor="middle">認可サーバー</text>
+  <rect class="xp-box" x="580" y="20" width="160" height="44" rx="10"/>
+  <text class="xp-text" x="660" y="47" text-anchor="middle">Web API</text>
+  <path class="xp-dash" d="M120 64V600"/>
+  <path class="xp-dash" d="M400 64V600"/>
+  <path class="xp-dash" d="M660 64V600"/>
+
+  <rect class="xp-box" x="24" y="86" width="192" height="50" rx="8"/>
+  <text class="xp-text" x="120" y="107" text-anchor="middle">① code_verifier を生成</text>
+  <text class="xp-small" x="120" y="126" text-anchor="middle">code_challenge を計算</text>
+
+  <path class="xp-line" d="M120 176H398" marker-end="url(#seq-arrow)"/>
+  <text class="xp-text" x="260" y="167" text-anchor="middle">② 認可リクエスト（リダイレクト）</text>
+  <text class="xp-small" x="260" y="193" text-anchor="middle">code_challenge / state / nonce</text>
+
+  <rect class="xp-box" x="310" y="214" width="180" height="40" rx="8"/>
+  <text class="xp-text" x="400" y="239" text-anchor="middle">③ ログイン・同意</text>
+
+  <path class="xp-line" d="M400 296H122" marker-end="url(#seq-arrow)"/>
+  <text class="xp-text" x="260" y="287" text-anchor="middle">④ リダイレクトで戻る</text>
+  <text class="xp-small" x="260" y="313" text-anchor="middle">code / state（state を照合）</text>
+
+  <path class="xp-path" d="M120 356H398" marker-end="url(#seq-arrow)"/>
+  <text class="xp-text" x="260" y="347" text-anchor="middle">⑤ トークンリクエスト（POST）</text>
+  <text class="xp-hot-text" x="260" y="373" text-anchor="middle">code + code_verifier</text>
+
+  <path class="xp-path" d="M400 416H122" marker-end="url(#seq-arrow)"/>
+  <text class="xp-text" x="260" y="407" text-anchor="middle">⑥ トークンを返す</text>
+  <text class="xp-small" x="260" y="433" text-anchor="middle">access / id / refresh token</text>
+
+  <rect class="xp-box" x="24" y="452" width="192" height="40" rx="8"/>
+  <text class="xp-text" x="120" y="477" text-anchor="middle">⑦ ID トークンを検証</text>
+
+  <path class="xp-line" d="M120 524H658" marker-end="url(#seq-arrow)"/>
+  <text class="xp-text" x="530" y="515" text-anchor="middle">⑧ API 呼び出し</text>
+  <text class="xp-small" x="530" y="541" text-anchor="middle">Authorization: Bearer access_token</text>
+  <path class="xp-line" d="M660 586H122" marker-end="url(#seq-arrow)"/>
+  <text class="xp-small" x="530" y="578" text-anchor="middle">⑨ レスポンス</text>
+</svg>
+<figcaption>②④ はブラウザのリダイレクト（フロントチャネル）、⑤⑥ は直接の HTTP 通信（バックチャネル）。トークンはフロントチャネルを通らない。</figcaption>
+</figure>
+
+<h2 id="step1">1. PKCE の値を作る</h2>
+<p>ログインのたびに、クライアントは推測できない乱数 <code>code_verifier</code>（43〜128 文字）を作り、そのハッシュを <code>code_challenge</code> とする。</p>
+<pre><code class="language-js">// 作例: ブラウザの Web Crypto API で PKCE の値を作る
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));   // 43 文字
+const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+const challenge = base64url(new Uint8Array(digest));
+</code></pre>
+<p><code>code_verifier</code> は手元に残し、<code>code_challenge</code> だけを送る。<code>Math.random()</code> は暗号用の乱数ではないので使わない。</p>
+
+<h2 id="step2">2. 認可リクエスト</h2>
+<p>ブラウザを認可エンドポイントへ移動させる。</p>
+<pre><code class="language-http">GET /authorize?response_type=code
+  &amp;client_id=spa-example
+  &amp;redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback
+  &amp;scope=openid%20profile%20orders%3Aread
+  &amp;state=af0ifjsldkj
+  &amp;nonce=n-0S6_WzA2Mj
+  &amp;code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+  &amp;code_challenge_method=S256 HTTP/1.1
+Host: auth.example.com
+</code></pre>
+<table>
+<thead><tr><th>パラメータ</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>response_type=code</code></td><td>認可コードを返してほしい</td></tr>
+<tr><td><code>redirect_uri</code></td><td>戻り先。登録済みの値と完全一致しなければ拒否される</td></tr>
+<tr><td><code>scope</code></td><td>要求する権限。<code>openid</code> を含めると OIDC になる</td></tr>
+<tr><td><code>state</code></td><td>リクエストとコールバックを結び付ける乱数</td></tr>
+<tr><td><code>nonce</code></td><td>ID トークンとリクエストを結び付ける乱数（OIDC）</td></tr>
+<tr><td><code>code_challenge</code> / <code>_method</code></td><td>PKCE。方式は必ず <code>S256</code>。<code>plain</code> は使わない</td></tr>
+</tbody>
+</table>
+
+<h2 id="step4">3. コールバック</h2>
+<p>ユーザーがログインして同意すると、認可サーバーはブラウザをリダイレクト URI へ戻す。</p>
+<pre><code class="language-http">HTTP/1.1 302 Found
+Location: https://app.example.com/callback?code=SplxlOBeZQQYbYS6WxSbIA&amp;state=af0ifjsldkj
+</code></pre>
+<p>クライアントは、受け取った <code>state</code> が自分の送った値と一致するかを確かめる。一致しなければ処理を止める。確認したら <code>history.replaceState</code> などで URL から <code>code</code> を消す。</p>
+
+<h2 id="step5">4. トークンリクエスト</h2>
+<pre><code class="language-http">POST /token HTTP/1.1
+Host: auth.example.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&amp;code=SplxlOBeZQQYbYS6WxSbIA
+&amp;redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback
+&amp;client_id=spa-example
+&amp;code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+</code></pre>
+<p>認可サーバーは <code>SHA256(code_verifier)</code> を計算し、手順 2 で受け取った <code>code_challenge</code> と比べる。一致すればトークンを返す。</p>
+<pre><code class="language-json">{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token": "8xLOxBtZp8...",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjFlOWdkazcifQ...",
+  "scope": "openid profile orders:read"
+}
+</code></pre>
+<p>BFF（Confidential client）の場合は、このリクエストにクライアント認証（<code>client_secret</code>、または <code>private_key_jwt</code>）も付ける。</p>
+
+<h2 id="why-pkce">PKCE が防ぐもの</h2>
+<p>認可コードは URL に載るので、漏れる経路がある。ブラウザの履歴、Referer、悪意あるブラウザ拡張、モバイルでは同じカスタム URL スキームを登録した別アプリなどである。</p>
+<ul>
+<li>PKCE がない場合: 横取りした <code>code</code> をトークンエンドポイントに送れば、攻撃者がトークンを得る</li>
+<li>PKCE がある場合: <code>code_verifier</code> はクライアントの中から出ていないので、攻撃者は交換できない</li>
+</ul>
+<p>PKCE はもともと Public client 向けに作られたが、現在は <strong>Confidential client でも使う</strong>ことが推奨されている（RFC 9700）。認可コードの注入攻撃も防げるためである。</p>
+
+<h2 id="params">パラメータと防ぐ攻撃</h2>
+<table>
+<thead><tr><th>仕組み</th><th>防ぐ攻撃</th><th>確認する人</th></tr></thead>
+<tbody>
+<tr><td><code>redirect_uri</code> の完全一致</td><td>認可コードを攻撃者のサイトへ送らせる</td><td>認可サーバー</td></tr>
+<tr><td><code>state</code></td><td>ログイン CSRF（攻撃者のアカウントでログインさせる）</td><td>クライアント</td></tr>
+<tr><td>PKCE</td><td>認可コードの横取り・注入</td><td>認可サーバー</td></tr>
+<tr><td><code>nonce</code></td><td>ID トークンのリプレイ</td><td>クライアント</td></tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">自分で実装しない</p>
+<p>ここで示した手順は理解のためである。実装には実績のあるライブラリ（oidc-client-ts、各 IdP の SDK、サーバー側なら Spring Security や openid-client など）を使う。</p>
+</div>
+
+<h2 id="refresh">リフレッシュ</h2>
+<p>アクセストークンが切れたら、リフレッシュトークンで新しいものを受け取る。ユーザーの操作は要らない。</p>
+<pre><code class="language-http">POST /token HTTP/1.1
+Host: auth.example.com
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&amp;refresh_token=8xLOxBtZp8...&amp;client_id=spa-example
+</code></pre>
+<p>Public client に渡すリフレッシュトークンは、<strong>使うたびに新しいものに替わる（ローテーション）</strong>か、送信者に紐付いている（DPoP）必要がある（RFC 9700）。詳しくは <a href="06-threats.html">06 章</a>で扱う。</p>
+
+<h2 id="summary">まとめ</h2>
+<ul>
+<li>ブラウザ経由で渡すのは使い捨ての認可コードだけ。トークンは直接通信で受け取る</li>
+<li>PKCE は <code>code_verifier</code> を知る者だけがコードを交換できるようにする。方式は <code>S256</code></li>
+<li><code>state</code> はログイン CSRF、<code>nonce</code> は ID トークンのリプレイ、<code>redirect_uri</code> の完全一致はコードの持ち出しを防ぐ</li>
+</ul>
+<h3 id="refs">根拠とした仕様</h3>
+<ul>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6749#section-4.1">RFC 6749 4.1 Authorization Code Grant</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc7636">RFC 7636 Proof Key for Code Exchange</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc9700">RFC 9700 Best Current Practice for OAuth 2.0 Security</a></li>
+</ul>
+</article>
+  </main>
+</div>
+
+<nav class="pager" aria-label="ほかの章へ"></nav>
+<footer class="site-footer">
+  <span>OAuth 2.0 / OpenID Connect 入門 — 学習ノート</span>
+  <span>IETF RFC と OpenID Connect 1.0 に基づく</span>
+</footer>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 OAuth 2.0 の基本 — OAuth 2.0 / OpenID Connect 入門</title>
+<meta name="description" content="OAuth 2.0 は、範囲と期限を限ったアクセストークンをクライアントに発行する仕組みである。SPA で使うグラントは認可コード + PKCE とリフレッシュトークンの 2 つだけである。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&amp;family=Noto+Sans+JP:wght@300;400;500;700&amp;display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body data-root="../" data-page="chapters/01-oauth2.html">
+<header class="site-header">
+  <a class="brand" href="../index.html">oauth<span>/</span>oidc notes</a>
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" aria-label="配色を切り替える"></button>
+    <button class="menu-toggle" type="button" aria-label="章の一覧を開く" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+  </div>
+</header>
+<div class="menu-overlay" id="menu"><nav class="menu-list" aria-label="章の一覧"></nav></div>
+
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="eyebrow">Chapter 01</p>
+    <h1>OAuth 2.0 の基本</h1>
+    <p class="sub">トークン、スコープ、グラント</p>
+  </div>
+  <svg class="hero-arrow" viewBox="0 0 44 64" aria-hidden="true"><path d="M22 0v62M2 42l20 20 20-20"/></svg>
+</section>
+
+<div class="page-body">
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#client-types">クライアントの種別</a></li><li><a href="#endpoints">エンドポイント</a></li><li><a href="#grants">グラントタイプ</a><ul><li><a href="#deprecated">使わないグラント</a></li></ul></li><li><a href="#tokens">トークン</a><ul><li><a href="#format">トークンの形式</a></li></ul></li><li><a href="#scope-aud">スコープと audience</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <main class="content">
+<article>
+<p>OAuth 2.0 は、<strong>範囲と期限を限ったアクセストークン</strong>をクライアントに発行する仕組みである。SPA で使うグラントは、<strong>認可コード + PKCE</strong> と<strong>リフレッシュトークン</strong>の 2 つだけである。</p>
+
+<h2 id="client-types">クライアントの種別</h2>
+<p>クライアントは、秘密（クライアントシークレットや秘密鍵）を守れるかどうかで 2 つに分かれる。この区別が、使えるフローと構成を決める。</p>
+<table>
+<thead><tr><th>種別</th><th>例</th><th>秘密を守れるか</th></tr></thead>
+<tbody>
+<tr><td>Confidential client</td><td>サーバーサイドの Web アプリ、BFF</td><td>守れる。サーバーの中にあり、利用者から見えない</td></tr>
+<tr><td>Public client</td><td>SPA、モバイルアプリ、デスクトップアプリ</td><td>守れない。配布したコードは誰でも読める</td></tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">SPA にクライアントシークレットを埋め込まない</p>
+<p>ビルドした JavaScript に埋めたシークレットは、開発者ツールで誰でも取り出せる。SPA は Public client として登録し、シークレットの代わりに PKCE を使う。</p>
+</div>
+
+<h2 id="endpoints">エンドポイント</h2>
+<table>
+<thead><tr><th>エンドポイント</th><th>誰が呼ぶか</th><th>役割</th></tr></thead>
+<tbody>
+<tr><td>認可エンドポイント（<code>/authorize</code>）</td><td>ブラウザ（リダイレクト）</td><td>ユーザーを認証し、同意を得て、認可コードを返す</td></tr>
+<tr><td>トークンエンドポイント（<code>/token</code>）</td><td>クライアント（直接の HTTP POST）</td><td>認可コードやリフレッシュトークンをトークンに交換する</td></tr>
+<tr><td>リダイレクト URI</td><td>認可サーバーがブラウザを戻す先</td><td>クライアント側の受け口。事前に登録する</td></tr>
+<tr><td>失効エンドポイント（<code>/revoke</code>）</td><td>クライアント</td><td>トークンを無効にする（RFC 7009）</td></tr>
+<tr><td>イントロスペクション（<code>/introspect</code>）</td><td>リソースサーバー</td><td>トークンが有効かを問い合わせる（RFC 7662）</td></tr>
+</tbody>
+</table>
+<p>認可エンドポイントは<strong>ブラウザ経由（フロントチャネル）</strong>、トークンエンドポイントは<strong>直接通信（バックチャネル）</strong>である。フロントチャネルの値は URL や履歴に残り得るので、ここにはトークンを流さない。</p>
+
+<h2 id="grants">グラントタイプ</h2>
+<p>グラントタイプは、クライアントがトークンを得る手順の種類である。</p>
+<table>
+<thead><tr><th>グラント</th><th>用途</th><th>SPA × Web API での扱い</th></tr></thead>
+<tbody>
+<tr><td>Authorization Code + PKCE</td><td>ユーザーが関わるログイン全般</td><td><strong>使う</strong>（<a href="02-auth-code-pkce.html">02 章</a>）</td></tr>
+<tr><td>Refresh Token</td><td>アクセストークンの再取得</td><td>使う。ブラウザに渡すならローテーションを必須にする</td></tr>
+<tr><td>Client Credentials</td><td>サービス間通信（ユーザー不在）</td><td>SPA では使わない。BFF やバッチから内部 API を呼ぶときに使う</td></tr>
+<tr><td>Device Authorization</td><td>入力手段の乏しい端末（TV など）</td><td>使わない</td></tr>
+</tbody>
+</table>
+<h3 id="deprecated">使わないグラント</h3>
+<table>
+<thead><tr><th>グラント</th><th>問題</th><th>扱い</th></tr></thead>
+<tbody>
+<tr><td>Implicit</td><td>アクセストークンを URL のフラグメントで返すため、履歴・Referer・ブラウザ拡張から漏れる。トークンが正しい相手に渡ったかも確かめられない</td><td>RFC 9700 で非推奨。OAuth 2.1 で削除</td></tr>
+<tr><td>Resource Owner Password Credentials</td><td>クライアントがパスワードを直接受け取る。OAuth が解決したかった問題そのもの。MFA とも相性が悪い</td><td>RFC 9700 で禁止。OAuth 2.1 で削除</td></tr>
+</tbody>
+</table>
+<p>かつて SPA は Implicit を使うのが定番だった。ブラウザから別オリジンのトークンエンドポイントを呼べなかった（CORS が普及していなかった）ためである。現在は CORS が使えるので、SPA でも認可コード + PKCE を使う。</p>
+
+<h2 id="tokens">トークン</h2>
+<table>
+<thead><tr><th>トークン</th><th>使う相手</th><th>寿命の目安</th><th>漏れたときの影響</th></tr></thead>
+<tbody>
+<tr><td>アクセストークン</td><td>Web API</td><td>5〜15 分</td><td>期限までの間、API を呼ばれる</td></tr>
+<tr><td>リフレッシュトークン</td><td>認可サーバーのトークンエンドポイント</td><td>数時間〜数十日</td><td>新しいアクセストークンを作られ続ける</td></tr>
+<tr><td>ID トークン（OIDC）</td><td>クライアント自身</td><td>数分</td><td>なりすましのログインに使われ得る</td></tr>
+</tbody>
+</table>
+<p>アクセストークンは <strong>Bearer トークン</strong>である。持っている人なら誰でも使える。送るときは <code>Authorization</code> ヘッダーに載せる。</p>
+<pre><code class="language-http">GET /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
+</code></pre>
+<p>クエリ文字列（<code>?access_token=...</code>）では送らない。サーバーのアクセスログやプロキシに残る。</p>
+<h3 id="format">トークンの形式</h3>
+<p>OAuth 2.0 はアクセストークンの形式を定めていない。実際には次の 2 つがある。</p>
+<table>
+<thead><tr><th>形式</th><th>検証方法</th><th>長所</th><th>短所</th></tr></thead>
+<tbody>
+<tr><td>JWT（RFC 9068）</td><td>API が署名を自分で検証する</td><td>認可サーバーへの問い合わせが不要で速い</td><td>期限前に失効させにくい</td></tr>
+<tr><td>不透明トークン（ランダムな文字列）</td><td>API が認可サーバーに問い合わせる</td><td>失効が即座に効く</td><td>リクエストごとに通信が発生する</td></tr>
+</tbody>
+</table>
+<p>クライアントはアクセストークンの中身を読まない。形式は認可サーバーと API の間の取り決めであり、クライアントから見ると単なる文字列である。</p>
+
+<h2 id="scope-aud">スコープと audience</h2>
+<ul>
+<li><strong>スコープ</strong>: トークンが許す操作の範囲。認可リクエストの <code>scope</code> パラメータで要求する（例: <code>orders:read orders:write</code>）。<strong>必要最小限</strong>だけ要求する</li>
+<li><strong>audience（<code>aud</code>）</strong>: トークンの宛先 API。宛先を限定すると、ある API に送ったトークンを別の API で使い回されない</li>
+</ul>
+<p>スコープは「クライアントに許した範囲」であり、「ユーザーに許された範囲」とは別である。たとえば <code>orders:read</code> を持つトークンでも、<strong>他人の注文</strong>を読ませてはいけない。それを確かめるのは API 側の責任である（<a href="05-api-validation.html">05 章</a>）。</p>
+
+<h2 id="summary">まとめ</h2>
+<ul>
+<li>SPA は Public client である。シークレットを持たず、PKCE を使う</li>
+<li>SPA で使うグラントは認可コード + PKCE とリフレッシュトークンだけ。Implicit と Password は使わない</li>
+<li>アクセストークンは短命の Bearer トークン。<code>Authorization</code> ヘッダーで送る</li>
+<li>スコープはクライアントの権限、audience は宛先。ユーザーごとの権限確認は API が行う</li>
+</ul>
+<h3 id="refs">根拠とした仕様</h3>
+<ul>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749 The OAuth 2.0 Authorization Framework</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc6750">RFC 6750 Bearer Token Usage</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc9068">RFC 9068 JWT Profile for OAuth 2.0 Access Tokens</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc9700">RFC 9700 Best Current Practice for OAuth 2.0 Security</a></li>
+</ul>
+</article>
+  </main>
+</div>
+
+<nav class="pager" aria-label="ほかの章へ"></nav>
+<footer class="site-footer">
+  <span>OAuth 2.0 / OpenID Connect 入門 — 学習ノート</span>
+  <span>IETF RFC と OpenID Connect 1.0 に基づく</span>
+</footer>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 SPA × Web API の構成 — OAuth 2.0 / OpenID Connect 入門</title>
+<meta name="description" content="SPA × Web API の構成の違いは、トークンをどこに置くかに尽きる。機密性の高いデータを扱うなら BFF を選ぶ。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&amp;family=Noto+Sans+JP:wght@300;400;500;700&amp;display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body data-root="../" data-page="chapters/04-spa-patterns.html">
+<header class="site-header">
+  <a class="brand" href="../index.html">oauth<span>/</span>oidc notes</a>
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" aria-label="配色を切り替える"></button>
+    <button class="menu-toggle" type="button" aria-label="章の一覧を開く" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+  </div>
+</header>
+<div class="menu-overlay" id="menu"><nav class="menu-list" aria-label="章の一覧"></nav></div>
+
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="eyebrow">Chapter 04</p>
+    <h1>SPA × Web API の構成</h1>
+    <p class="sub">トークンをどこに置くか</p>
+  </div>
+  <svg class="hero-arrow" viewBox="0 0 44 64" aria-hidden="true"><path d="M22 0v62M2 42l20 20 20-20"/></svg>
+</section>
+
+<div class="page-body">
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#problem">SPA の難しさ</a></li><li><a href="#patterns">3 つの構成</a><ul><li><a href="#bff">A. BFF</a></li><li><a href="#tmb">B. Token-Mediating Backend</a></li><li><a href="#browser">C. ブラウザ内クライアント</a></li></ul></li><li><a href="#compare">比較</a></li><li><a href="#choose">選び方</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <main class="content">
+<article>
+<p>SPA × Web API の構成の違いは、<strong>トークンをどこに置くか</strong>に尽きる。機密性の高いデータを扱うなら、トークンをブラウザに置かない <strong>BFF</strong> を選ぶ。</p>
+
+<h2 id="problem">SPA の難しさ</h2>
+<p>ブラウザは、同じページで動くすべての JavaScript を同じ権限で動かす。自分のコードも、依存ライブラリも、XSS で注入されたコードも区別しない。したがって、<strong>ページの JavaScript から触れるトークンは、XSS が起きたら攻撃者にも触れる</strong>。</p>
+<p>この前提から、IETF のドラフト「OAuth 2.0 for Browser-Based Applications」は 3 つの構成を、安全な順に示している。</p>
+
+<h2 id="patterns">3 つの構成</h2>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 400" role="img" aria-label="BFF 方式とブラウザ内クライアント方式の比較">
+  <defs><marker id="pt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <text class="xp-accent" x="40" y="30">A. BFF</text>
+  <rect class="xp-box" x="40" y="48" width="300" height="64" rx="10"/>
+  <text class="xp-text" x="190" y="76" text-anchor="middle">ブラウザ（SPA）</text>
+  <text class="xp-small" x="190" y="97" text-anchor="middle">トークンを持たない</text>
+  <path class="xp-line" d="M190 112V170" marker-end="url(#pt-arrow)"/>
+  <text class="xp-small" x="202" y="146">HttpOnly Cookie</text>
+  <rect class="xp-hot" x="40" y="172" width="300" height="64" rx="10"/>
+  <text class="xp-text" x="190" y="200" text-anchor="middle">BFF（同一オリジン）</text>
+  <text class="xp-small" x="190" y="221" text-anchor="middle">トークンをサーバー側に保管</text>
+  <path class="xp-line" d="M110 236V318" marker-end="url(#pt-arrow)"/>
+  <text class="xp-small" x="122" y="282">トークン取得</text>
+  <path class="xp-line" d="M270 236V318" marker-end="url(#pt-arrow)"/>
+  <text class="xp-small" x="282" y="282">Bearer</text>
+  <rect class="xp-box" x="40" y="320" width="140" height="56" rx="10"/>
+  <text class="xp-text" x="110" y="353" text-anchor="middle">認可サーバー</text>
+  <rect class="xp-box" x="200" y="320" width="140" height="56" rx="10"/>
+  <text class="xp-text" x="270" y="353" text-anchor="middle">Web API</text>
+
+  <path class="xp-dash" d="M380 20V384"/>
+
+  <text class="xp-accent" x="420" y="30">C. ブラウザ内クライアント</text>
+  <rect class="xp-hot" x="420" y="48" width="300" height="64" rx="10"/>
+  <text class="xp-text" x="570" y="76" text-anchor="middle">ブラウザ（SPA）</text>
+  <text class="xp-small" x="570" y="97" text-anchor="middle">トークンを JavaScript のメモリに保管</text>
+  <path class="xp-line" d="M490 112V318" marker-end="url(#pt-arrow)"/>
+  <text class="xp-small" x="502" y="282">トークン取得</text>
+  <path class="xp-line" d="M650 112V318" marker-end="url(#pt-arrow)"/>
+  <text class="xp-small" x="662" y="282">Bearer</text>
+  <text class="xp-warn" x="570" y="190" text-anchor="middle">XSS で</text>
+  <text class="xp-warn" x="570" y="208" text-anchor="middle">トークンを盗まれ得る</text>
+  <rect class="xp-box" x="420" y="320" width="140" height="56" rx="10"/>
+  <text class="xp-text" x="490" y="353" text-anchor="middle">認可サーバー</text>
+  <rect class="xp-box" x="580" y="320" width="140" height="56" rx="10"/>
+  <text class="xp-text" x="650" y="353" text-anchor="middle">Web API</text>
+</svg>
+<figcaption>強調した箱がトークンを持つ場所。B 方式は、A の BFF がアクセストークンだけをブラウザに渡す形である。</figcaption>
+</figure>
+
+<h3 id="bff">A. BFF（Backend for Frontend）</h3>
+<p>SPA と同じオリジンに置いたサーバー（BFF）が、Confidential client として OAuth のフローを回す。トークンは BFF のセッションに保管し、ブラウザには <strong>HttpOnly のセッション Cookie</strong> だけを渡す。SPA からの API 呼び出しは BFF が中継し、アクセストークンを付けて Web API へ送る。</p>
+<ul>
+<li>XSS が起きても<strong>トークン自体は盗まれない</strong>。ただし攻撃者は、被害者のブラウザから BFF 経由で API を呼べる（セッションの乗っ取り）。XSS 対策は依然として必要である</li>
+<li>Cookie を使うので、<strong>CSRF 対策が必要</strong>になる（<a href="06-threats.html">06 章</a>）</li>
+<li>SPA と BFF が同一オリジンなら、<strong>CORS は不要</strong>になる</li>
+</ul>
+
+<h3 id="tmb">B. Token-Mediating Backend</h3>
+<p>バックエンドが OAuth のフローを回し、リフレッシュトークンは自分で持つ。<strong>アクセストークンだけ</strong>を SPA に渡し、SPA は Web API を直接呼ぶ。</p>
+<ul>
+<li>リフレッシュトークンは守れるが、アクセストークンは XSS で盗まれ得る</li>
+<li>API を BFF で中継できない事情（遅延、既存の API ゲートウェイなど）がある場合の折衷案である</li>
+</ul>
+
+<h3 id="browser">C. ブラウザ内クライアント</h3>
+<p>SPA 自身が Public client として認可コード + PKCE を回し、トークンをブラウザ内に持つ。oidc-client-ts や各 IdP の SDK が使う方式である。</p>
+<ul>
+<li>静的ホスティングだけで動き、<strong>構成が最も簡単</strong></li>
+<li>XSS が起きると、アクセストークンとリフレッシュトークンの<strong>両方を盗まれ得る</strong>。盗まれたトークンは攻撃者の環境から使える</li>
+<li>採用するなら、リフレッシュトークンのローテーション、短い寿命、厳格な CSP を必須にする</li>
+</ul>
+
+<h2 id="compare">比較</h2>
+<table>
+<thead><tr><th>観点</th><th>A. BFF</th><th>B. Token-Mediating</th><th>C. ブラウザ内</th></tr></thead>
+<tbody>
+<tr><td>OAuth クライアント</td><td>BFF（Confidential）</td><td>バックエンド（Confidential）</td><td>SPA（Public）</td></tr>
+<tr><td>アクセストークンの場所</td><td>サーバー</td><td>ブラウザのメモリ</td><td>ブラウザのメモリ</td></tr>
+<tr><td>リフレッシュトークンの場所</td><td>サーバー</td><td>サーバー</td><td>ブラウザ</td></tr>
+<tr><td>ブラウザ→サーバーの資格情報</td><td>セッション Cookie</td><td>Cookie + Bearer</td><td>Bearer</td></tr>
+<tr><td>API の呼び方</td><td>BFF が中継</td><td>SPA が直接</td><td>SPA が直接</td></tr>
+<tr><td>XSS でのトークン窃取</td><td>不可</td><td>アクセストークンのみ</td><td>両方</td></tr>
+<tr><td>CSRF 対策</td><td>必要</td><td>必要</td><td>不要（Cookie を使わない場合）</td></tr>
+<tr><td>CORS 設定</td><td>不要（同一オリジン）</td><td>API 側で必要</td><td>API と認可サーバーで必要</td></tr>
+<tr><td>運用の手間</td><td>サーバーとセッションストアが要る</td><td>中程度</td><td>最小（静的ホスティング可）</td></tr>
+</tbody>
+</table>
+
+<h2 id="choose">選び方</h2>
+<ol>
+<li>個人情報、決済、医療、業務データを扱う → <strong>A. BFF</strong></li>
+<li>BFF で中継できない明確な理由がある → <strong>B. Token-Mediating Backend</strong></li>
+<li>扱うデータの機密性が低く、サーバーを持てない → <strong>C. ブラウザ内クライアント</strong>（対策を全部入れる）</li>
+</ol>
+<div class="admonition">
+<p class="admonition-title">Service Worker や Web Worker にトークンを閉じ込める方法</p>
+<p>C 方式の改良として、トークンを Worker の中だけに置き、ページの JavaScript から直接読めないようにする方法がある。トークンの持ち出しは難しくなるが、XSS で注入されたコードが Worker 経由で API を呼ぶことは防げない。BFF と同じく「乗っ取り」は残る。</p>
+</div>
+
+<h2 id="summary">まとめ</h2>
+<ul>
+<li>ページの JavaScript から触れるトークンは、XSS が起きれば攻撃者にも触れる</li>
+<li>BFF はトークンをサーバーに置き、ブラウザには HttpOnly Cookie だけを渡す。既定の選択はこれ</li>
+<li>どの構成でも XSS 対策は要る。BFF は「盗まれる」を防ぐが「乗っ取られる」は防がない</li>
+</ul>
+<h3 id="refs">根拠とした仕様</h3>
+<ul>
+<li><a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-browser-based-apps/">OAuth 2.0 for Browser-Based Applications（ドラフト）</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc9700">RFC 9700 Best Current Practice for OAuth 2.0 Security</a></li>
+</ul>
+</article>
+  </main>
+</div>
+
+<nav class="pager" aria-label="ほかの章へ"></nav>
+<footer class="site-footer">
+  <span>OAuth 2.0 / OpenID Connect 入門 — 学習ノート</span>
+  <span>IETF RFC と OpenID Connect 1.0 に基づく</span>
+</footer>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

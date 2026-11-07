@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OAuth 2.0 / OpenID Connect 入門</title>
+<meta name="description" content="OAuth 2.0 と OpenID Connect の仕組みから、SPA × Web API での認証・認可の設計と実装までを体系的に学ぶ学習ノート。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&amp;family=Noto+Sans+JP:wght@300;400;500;700&amp;display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+</head>
+<body class="home" data-root="" data-page="index.html">
+<header class="site-header">
+  <a class="brand" href="index.html">oauth<span>/</span>oidc notes</a>
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" aria-label="配色を切り替える"></button>
+    <button class="menu-toggle" type="button" aria-label="章の一覧を開く" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+  </div>
+</header>
+<div class="menu-overlay" id="menu"><nav class="menu-list" aria-label="章の一覧"></nav></div>
+
+<section class="hero hero--top">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="eyebrow">OAuth 2.0 / OpenID Connect — Study Notes</p>
+    <h1>oauth &amp;<br>openid connect</h1>
+    <p class="sub">SPA から Web API を安全に呼ぶために、認証と認可の仕組みを仕様の言葉で説明できるようになるための学習ノート。</p>
+  </div>
+  <svg class="hero-arrow" viewBox="0 0 44 64" aria-hidden="true"><path d="M22 0v62M2 42l20 20 20-20"/></svg>
+</section>
+
+<main>
+  <section class="section" id="about">
+    <p class="lead">「ログインには OAuth を使う」「トークンは localStorage に置く」——よく聞くが、どこまで正しいかがあいまいな人に向けて書いている。<strong>OAuth 2.0 は認可、OpenID Connect は認証</strong>という区別から始め、SPA × Web API の構成を選び、実装で確認すべき点までを順に扱う。</p>
+    <ol class="goals">
+      <li><span class="n">GOAL 01</span><strong>認証と認可の違い</strong>、アクセストークンと ID トークンの役割の違いを説明できる</li>
+      <li><span class="n">GOAL 02</span><strong>認可コードフロー + PKCE</strong> の各パラメータが、どの攻撃を防いでいるかを説明できる</li>
+      <li><span class="n">GOAL 03</span>SPA × Web API で <strong>BFF とブラウザ内クライアント</strong>のどちらを選ぶかを、脅威から判断できる</li>
+    </ol>
+  </section>
+
+  <section class="section" id="chapters">
+    <div class="section-head">
+      <h2 class="section-title">chapters</h2>
+    </div>
+    <div class="grid" id="chapter-grid"></div>
+  </section>
+
+  <section class="section" id="policy">
+    <div class="section-head"><h2 class="section-title">policy</h2></div>
+    <ul class="policy">
+      <li>説明は IETF の RFC と OpenID Foundation の仕様に基づく。章の末尾に根拠とした仕様を載せる</li>
+      <li>コードや HTTP のやり取りは説明のための作例である。実際の値は利用する認可サーバー（Keycloak、Auth0、Entra ID、Cognito など）の資料で確認する</li>
+      <li>ドラフト段階の仕様（OAuth 2.1、OAuth 2.0 for Browser-Based Applications）は内容が変わり得る。最新の版を確認する</li>
+    </ul>
+  </section>
+
+  <section class="section" id="references">
+    <div class="section-head"><h2 class="section-title">references</h2></div>
+    <table>
+      <thead><tr><th>仕様</th><th>扱う内容</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc6749">RFC 6749</a></td><td>OAuth 2.0 の枠組み（ロール、グラント、エンドポイント）</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc6750">RFC 6750</a></td><td>Bearer トークンの送り方とエラー応答</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc7636">RFC 7636</a></td><td>PKCE</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc7009">RFC 7009</a></td><td>トークンの失効</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc7662">RFC 7662</a></td><td>トークンイントロスペクション</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc9068">RFC 9068</a></td><td>JWT 形式のアクセストークン</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc9449">RFC 9449</a></td><td>DPoP（送信者制約トークン）</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/html/rfc9700">RFC 9700</a></td><td>OAuth 2.0 セキュリティのベストプラクティス</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/">OAuth 2.1（ドラフト）</a></td><td>OAuth 2.0 と関連仕様の統合・整理</td></tr>
+        <tr><td><a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-browser-based-apps/">OAuth 2.0 for Browser-Based Applications（ドラフト）</a></td><td>SPA の構成パターン</td></tr>
+        <tr><td><a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core 1.0</a></td><td>ID トークン、UserInfo、認証フロー</td></tr>
+        <tr><td><a href="https://openid.net/specs/openid-connect-discovery-1_0.html">OpenID Connect Discovery 1.0</a></td><td>設定情報の自動取得</td></tr>
+        <tr><td><a href="https://openid.net/specs/openid-connect-rpinitiated-1_0.html">OpenID Connect RP-Initiated Logout 1.0</a></td><td>ログアウト</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span>OAuth 2.0 / OpenID Connect 入門 — 学習ノート</span>
+  <span>IETF RFC と OpenID Connect 1.0 に基づく</span>
+</footer>
+<script src="assets/nav.js"></script>
+</body>
+</html>

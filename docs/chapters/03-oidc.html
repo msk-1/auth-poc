@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 OpenID Connect — OAuth 2.0 / OpenID Connect 入門</title>
+<meta name="description" content="OpenID Connect は OAuth 2.0 の上に載る認証の仕様である。scope に openid を含めると、ログインしたユーザーを表す ID トークンが返る。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&amp;family=Noto+Sans+JP:wght@300;400;500;700&amp;display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/theme.js"></script>
+</head>
+<body data-root="../" data-page="chapters/03-oidc.html">
+<header class="site-header">
+  <a class="brand" href="../index.html">oauth<span>/</span>oidc notes</a>
+  <div class="header-actions">
+    <button class="theme-toggle" type="button" aria-label="配色を切り替える"></button>
+    <button class="menu-toggle" type="button" aria-label="章の一覧を開く" aria-expanded="false" aria-controls="menu"><span></span><span></span></button>
+  </div>
+</header>
+<div class="menu-overlay" id="menu"><nav class="menu-list" aria-label="章の一覧"></nav></div>
+
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="eyebrow">Chapter 03</p>
+    <h1>OpenID Connect</h1>
+    <p class="sub">ログインした人を確かめる</p>
+  </div>
+  <svg class="hero-arrow" viewBox="0 0 44 64" aria-hidden="true"><path d="M22 0v62M2 42l20 20 20-20"/></svg>
+</section>
+
+<div class="page-body">
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#id-token">ID トークン</a><ul><li><a href="#jwt">JWT の構造</a></li><li><a href="#claims">主なクレーム</a></li><li><a href="#validate">ID トークンの検証</a></li></ul></li><li><a href="#scopes">スコープとクレーム</a></li><li><a href="#userinfo">UserInfo エンドポイント</a></li><li><a href="#discovery">ディスカバリと JWKS</a></li><li><a href="#logout">ログアウト</a></li><li><a href="#mistakes">よくある誤り</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <main class="content">
+<article>
+<p>OpenID Connect（OIDC）は OAuth 2.0 の上に載る<strong>認証</strong>の仕様である。認可リクエストの <code>scope</code> に <code>openid</code> を含めると、アクセストークンに加えて、ログインしたユーザーを表す <strong>ID トークン</strong>が返る。</p>
+
+<h2 id="id-token">ID トークン</h2>
+<p>ID トークンは「<strong>どの IdP が、どのユーザーを、いつ、どのクライアントのために</strong>認証したか」を表す、署名付きの JWT である。</p>
+<h3 id="jwt">JWT の構造</h3>
+<p>JWT は <code>.</code> で区切られた 3 つの Base64URL 文字列からなる。</p>
+<pre><code class="language-text">ヘッダー.ペイロード.署名
+eyJhbGciOiJSUzI1NiIsImtpZCI6IjFlOWdkazcifQ.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20i...signature
+</code></pre>
+<pre><code class="language-json">// ヘッダー（作例）
+{ "alg": "RS256", "kid": "1e9gdk7", "typ": "JWT" }
+
+// ペイロード（作例）
+{
+  "iss": "https://auth.example.com",
+  "sub": "248289761001",
+  "aud": "spa-example",
+  "exp": 1762590000,
+  "iat": 1762589700,
+  "auth_time": 1762589690,
+  "nonce": "n-0S6_WzA2Mj",
+  "amr": ["pwd", "otp"],
+  "name": "Jane Doe",
+  "email": "jane@example.com"
+}
+</code></pre>
+<p>ペイロードは<strong>暗号化されていない</strong>。Base64URL を戻せば誰でも読める。秘密の情報を載せない。</p>
+<h3 id="claims">主なクレーム</h3>
+<table>
+<thead><tr><th>クレーム</th><th>意味</th><th>確かめること</th></tr></thead>
+<tbody>
+<tr><td><code>iss</code></td><td>発行者</td><td>想定する IdP の URL と完全一致するか</td></tr>
+<tr><td><code>sub</code></td><td>ユーザーの識別子（IdP 内で一意・不変）</td><td>アカウントの紐付けに使う</td></tr>
+<tr><td><code>aud</code></td><td>宛先クライアント</td><td>自分の <code>client_id</code> を含むか</td></tr>
+<tr><td><code>exp</code> / <code>iat</code></td><td>有効期限 / 発行時刻</td><td>期限が切れていないか</td></tr>
+<tr><td><code>nonce</code></td><td>認可リクエストで送った乱数</td><td>自分が送った値と一致するか</td></tr>
+<tr><td><code>auth_time</code></td><td>ユーザーが実際に認証した時刻</td><td>再認証が必要な操作で古すぎないか</td></tr>
+<tr><td><code>acr</code> / <code>amr</code></td><td>認証の強さ / 方式（パスワード、OTP など）</td><td>MFA が必須の操作で要件を満たすか</td></tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">ユーザーの紐付けは iss + sub で行う</p>
+<p><code>email</code> は変わることがあり、IdP によっては未確認のアドレスも入る。アカウントの紐付けを email で行うと、他人のアカウントに入れる場合がある。キーは <code>iss</code> と <code>sub</code> の組にする。</p>
+</div>
+<h3 id="validate">ID トークンの検証</h3>
+<p>クライアントは ID トークンを受け取ったら、次の順で検証する（OIDC Core 3.1.3.7）。</p>
+<ol>
+<li>JWKS から <code>kid</code> の公開鍵を取り、署名を検証する。<code>alg</code> は想定するもの（<code>RS256</code> など）だけを受け入れる</li>
+<li><code>iss</code> が IdP と一致する</li>
+<li><code>aud</code> が自分の <code>client_id</code> を含む。複数の値を含むなら <code>azp</code> も確かめる</li>
+<li><code>exp</code> が現在より未来である</li>
+<li><code>nonce</code> が送った値と一致する</li>
+</ol>
+<p>認可コードフローではトークンエンドポイントから直接受け取るので、TLS によって発行元は確かである。それでも <code>nonce</code> と <code>aud</code> の確認は省かない。</p>
+
+<h2 id="scopes">スコープとクレーム</h2>
+<table>
+<thead><tr><th>スコープ</th><th>得られるクレーム</th></tr></thead>
+<tbody>
+<tr><td><code>openid</code></td><td><code>sub</code>（必須。これがないと OIDC にならない）</td></tr>
+<tr><td><code>profile</code></td><td><code>name</code>、<code>family_name</code>、<code>given_name</code>、<code>picture</code> など</td></tr>
+<tr><td><code>email</code></td><td><code>email</code>、<code>email_verified</code></td></tr>
+<tr><td><code>offline_access</code></td><td>リフレッシュトークンの発行を求める</td></tr>
+</tbody>
+</table>
+
+<h2 id="userinfo">UserInfo エンドポイント</h2>
+<p>アクセストークンを付けて呼ぶと、プロフィール情報を JSON で返す。ID トークンに入れなかったクレームを取るときに使う。</p>
+<pre><code class="language-http">GET /userinfo HTTP/1.1
+Host: auth.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
+</code></pre>
+<p>応答の <code>sub</code> が ID トークンの <code>sub</code> と一致することを確かめる。</p>
+
+<h2 id="discovery">ディスカバリと JWKS</h2>
+<p>IdP の設定は <code>{issuer}/.well-known/openid-configuration</code> で公開されている。エンドポイントの URL は、ここから取得し、ハードコードしない。</p>
+<pre><code class="language-json">{
+  "issuer": "https://auth.example.com",
+  "authorization_endpoint": "https://auth.example.com/authorize",
+  "token_endpoint": "https://auth.example.com/token",
+  "userinfo_endpoint": "https://auth.example.com/userinfo",
+  "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+  "end_session_endpoint": "https://auth.example.com/logout",
+  "code_challenge_methods_supported": ["S256"],
+  "id_token_signing_alg_values_supported": ["RS256", "ES256"]
+}
+</code></pre>
+<p><code>jwks_uri</code> は署名検証用の<strong>公開鍵の一覧</strong>を返す。IdP は定期的に鍵を替える（鍵ローテーション）。検証側は JWKS をキャッシュし、知らない <code>kid</code> が来たら取り直す。</p>
+
+<h2 id="logout">ログアウト</h2>
+<p>ログアウトには 3 つの層がある。どれか 1 つだけでは「ログアウトしたつもり」になる。</p>
+<table>
+<thead><tr><th>層</th><th>やること</th></tr></thead>
+<tbody>
+<tr><td>アプリのセッション</td><td>SPA のメモリや BFF のセッションを破棄する</td></tr>
+<tr><td>トークン</td><td>リフレッシュトークンを失効エンドポイントで無効にする（RFC 7009）</td></tr>
+<tr><td>IdP のセッション</td><td><code>end_session_endpoint</code> にリダイレクトする（RP-Initiated Logout）。<code>id_token_hint</code> と <code>post_logout_redirect_uri</code> を付ける</td></tr>
+</tbody>
+</table>
+<p>IdP のセッションを残すと、次に「ログイン」を押したとき、パスワードを入れずにそのままログインできてしまう。共用端末では問題になる。</p>
+
+<h2 id="mistakes">よくある誤り</h2>
+<ul>
+<li><strong>ID トークンを API に送る</strong>: ID トークンの <code>aud</code> はクライアントであり API ではない。API にはアクセストークンを送る</li>
+<li><strong>アクセストークンをログインの証拠にする</strong>: 別のクライアント向けに発行されたトークンを持ち込まれても区別できない（トークン置換）</li>
+<li><strong>署名を検証せずにペイロードを読んで信じる</strong>: ペイロードは誰でも書き換えられる。表示に使うだけでも、検証した後にする</li>
+</ul>
+
+<h2 id="summary">まとめ</h2>
+<ul>
+<li><code>scope=openid</code> で OIDC になり、ID トークンが返る。ID トークンはクライアントが読むもの</li>
+<li>検証は署名、<code>iss</code>、<code>aud</code>、<code>exp</code>、<code>nonce</code> の順。ユーザーのキーは <code>iss</code> + <code>sub</code></li>
+<li>設定はディスカバリから取り、公開鍵は JWKS から取る。鍵ローテーションに備える</li>
+<li>ログアウトはアプリ、トークン、IdP の 3 層で行う</li>
+</ul>
+<h3 id="refs">根拠とした仕様</h3>
+<ul>
+<li><a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core 1.0</a></li>
+<li><a href="https://openid.net/specs/openid-connect-discovery-1_0.html">OpenID Connect Discovery 1.0</a></li>
+<li><a href="https://openid.net/specs/openid-connect-rpinitiated-1_0.html">OpenID Connect RP-Initiated Logout 1.0</a></li>
+<li><a href="https://datatracker.ietf.org/doc/html/rfc7009">RFC 7009 OAuth 2.0 Token Revocation</a></li>
+</ul>
+</article>
+  </main>
+</div>
+
+<nav class="pager" aria-label="ほかの章へ"></nav>
+<footer class="site-footer">
+  <span>OAuth 2.0 / OpenID Connect 入門 — 学習ノート</span>
+  <span>IETF RFC と OpenID Connect 1.0 に基づく</span>
+</footer>
+<script src="../assets/nav.js"></script>
+</body>
+</html>
