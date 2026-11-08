@@ -32,7 +32,7 @@
 </section>
 
 <div class="page-body">
-  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#id-token">ID トークン</a><ul><li><a href="#jwt">JWT の構造</a></li><li><a href="#claims">主なクレーム</a></li><li><a href="#validate">ID トークンの検証</a></li></ul></li><li><a href="#scopes">スコープとクレーム</a></li><li><a href="#userinfo">UserInfo エンドポイント</a></li><li><a href="#discovery">ディスカバリと JWKS</a></li><li><a href="#logout">ログアウト</a></li><li><a href="#mistakes">よくある誤り</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#id-token">ID トークン</a><ul><li><a href="#jwt">JWT の構造</a></li><li><a href="#claims">主なクレーム</a></li><li><a href="#validate">ID トークンの検証</a></li></ul></li><li><a href="#scopes">スコープとクレーム</a></li><li><a href="#userinfo">UserInfo エンドポイント</a></li><li><a href="#discovery">ディスカバリと JWKS</a></li><li><a href="#logout">ログアウト</a></li><li><a href="#federation">OpenID Federation</a><ul><li><a href="#fed-entities">登場するエンティティ</a></li><li><a href="#fed-statements">Entity Statement</a></li><li><a href="#trust-chain">トラストチェーン</a></li><li><a href="#metadata-policy">メタデータポリシー</a></li><li><a href="#fed-registration">クライアント登録</a></li><li><a href="#trust-marks">トラストマーク</a></li><li><a href="#fed-when">使いどころ</a></li></ul></li><li><a href="#mistakes">よくある誤り</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
   <main class="content">
 <article>
 <p>OpenID Connect（OIDC）は OAuth 2.0 の上に載る<strong>認証</strong>の仕様である。認可リクエストの <code>scope</code> に <code>openid</code> を含めると、アクセストークンに加えて、ログインしたユーザーを表す <strong>ID トークン</strong>が返る。</p>
@@ -136,6 +136,120 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
 </table>
 <p>IdP のセッションを残すと、次に「ログイン」を押したとき、パスワードを入れずにそのままログインできてしまう。共用端末では問題になる。</p>
 
+<h2 id="federation">OpenID Federation</h2>
+<p>ここまでの OIDC は、RP と OP が<strong>1 対 1 で事前に関係を結ぶ</strong>ことを前提にしている。RP は OP にクライアント登録をして <code>client_id</code> を受け取り、OP の issuer を設定に書く。参加する組織が数十、数百と増えると、この組み合わせを個別に管理できなくなる。</p>
+<p>OpenID Federation 1.0 は、<strong>参加者全員が信頼する第三者（Trust Anchor）</strong>を介して、初対面の RP と OP が互いを信頼できるようにする仕様である。2026 年 2 月に Final Specification として承認された。</p>
+<p>00 章の<a href="00-overview.html#confusing">フェデレーション（IdP ブローカー）</a>とは別のものである。ブローカーはログインを中継する構成であり、OpenID Federation は参加者どうしの信頼を確立する仕組みである。</p>
+
+<h3 id="fed-entities">登場するエンティティ</h3>
+<p>参加者はすべて<strong>エンティティ</strong>と呼ばれ、URL 形式の <strong>Entity Identifier</strong> で識別される。</p>
+<table>
+<thead><tr><th>エンティティ</th><th>役割</th></tr></thead>
+<tbody>
+<tr><td>Trust Anchor</td><td>信頼の起点となる第三者。フェデレーションの運営者にあたる。参加者はその公開鍵を事前に持っている</td></tr>
+<tr><td>Intermediate</td><td>Trust Anchor と Leaf の間に入り、配下の参加者について署名する（例: 業界団体、大学の連合）</td></tr>
+<tr><td>Leaf</td><td>配下を持たないエンティティ。実際に OIDC を話す RP や OP がこれにあたる</td></tr>
+</tbody>
+</table>
+
+<h3 id="fed-statements">Entity Configuration と Subordinate Statement</h3>
+<p>信頼の材料は <strong>Entity Statement</strong> と呼ばれる署名付き JWT である（<code>typ</code> は <code>entity-statement+jwt</code>）。次の 2 種類がある。</p>
+<ul>
+<li><strong>Entity Configuration</strong>: エンティティが自分自身について自己署名して公開するもの。<code>{Entity Identifier}/.well-known/openid-federation</code> から取得する。<code>iss</code> と <code>sub</code> は同じ値になる</li>
+<li><strong>Subordinate Statement</strong>: 上位のエンティティが直下のエンティティについて署名するもの。<code>iss</code> が上位、<code>sub</code> が配下になる。上位の <code>federation_fetch_endpoint</code> から取得する</li>
+</ul>
+<p>RP の Entity Configuration のペイロードは、たとえば次のようになる（作例）。</p>
+<pre><code class="language-json">{
+  "iss": "https://rp.example.org",
+  "sub": "https://rp.example.org",
+  "iat": 1762560000,
+  "exp": 1762646400,
+  "jwks": { "keys": [ { "kty": "EC", "kid": "fed-1", "crv": "P-256", "x": "...", "y": "..." } ] },
+  "authority_hints": ["https://intermediate.example.net"],
+  "metadata": {
+    "openid_relying_party": {
+      "client_name": "Example RP",
+      "redirect_uris": ["https://rp.example.org/callback"],
+      "client_registration_types": ["automatic"],
+      "token_endpoint_auth_method": "private_key_jwt",
+      "jwks": { "keys": [ "..." ] }
+    }
+  }
+}
+</code></pre>
+<ul>
+<li><code>jwks</code>: Entity Statement の署名に使う鍵（フェデレーション用の鍵）</li>
+<li><code>authority_hints</code>: 自分の上位エンティティの一覧。チェーンをたどる手がかりになる</li>
+<li><code>metadata</code>: エンティティの種類ごとのメタデータ。<code>openid_relying_party</code>、<code>openid_provider</code>、<code>federation_entity</code> などがある。OP の場合、<code>openid_provider</code> の中身はディスカバリと同じ項目になる</li>
+</ul>
+<p>Entity Configuration だけでは自己申告にすぎない。<strong>上位が Subordinate Statement で「この鍵はこのエンティティのものだ」と保証する</strong>ことで、はじめて信頼できる。</p>
+
+<h3 id="trust-chain">トラストチェーン</h3>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 350" role="img" aria-label="Trust Anchor から Intermediate を経て Leaf までの Subordinate Statement の連なりがトラストチェーンになる">
+  <defs><marker id="tc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <rect class="xp-hot" x="280" y="20" width="200" height="60" rx="10"/>
+  <text class="xp-text" x="380" y="46" text-anchor="middle">Trust Anchor</text>
+  <text class="xp-small" x="380" y="66" text-anchor="middle">鍵を全員が事前に持つ</text>
+  <rect class="xp-box" x="60" y="140" width="220" height="60" rx="10"/>
+  <text class="xp-text" x="170" y="166" text-anchor="middle">Intermediate</text>
+  <text class="xp-small" x="170" y="186" text-anchor="middle">例: 業界団体</text>
+  <rect class="xp-box" x="60" y="260" width="220" height="60" rx="10"/>
+  <text class="xp-text" x="170" y="286" text-anchor="middle">RP（Leaf）</text>
+  <text class="xp-mono" x="170" y="306" text-anchor="middle">rp.example.org</text>
+  <rect class="xp-box" x="480" y="260" width="220" height="60" rx="10"/>
+  <text class="xp-text" x="590" y="286" text-anchor="middle">OP（Leaf）</text>
+  <text class="xp-mono" x="590" y="306" text-anchor="middle">op.example.com</text>
+  <path class="xp-line" d="M330 80L200 138" marker-end="url(#tc-arrow)"/>
+  <text class="xp-small" x="250" y="100" text-anchor="end">Subordinate Statement</text>
+  <path class="xp-line" d="M170 200V258" marker-end="url(#tc-arrow)"/>
+  <text class="xp-small" x="182" y="234">Subordinate Statement</text>
+  <path class="xp-line" d="M430 80L590 258" marker-end="url(#tc-arrow)"/>
+  <text class="xp-small" x="530" y="160">Subordinate Statement</text>
+  <path class="xp-dash" d="M284 290H476" marker-start="url(#tc-arrow)" marker-end="url(#tc-arrow)"/>
+  <text class="xp-accent" x="380" y="342" text-anchor="middle">RP と OP は、相手のチェーンを Trust Anchor までたどって信頼する</text>
+</svg>
+<figcaption>矢印は「上位が配下について Subordinate Statement を発行する」向きを表す。</figcaption>
+</figure>
+<p><strong>トラストチェーン</strong>は、対象エンティティの Entity Configuration から始まり、Trust Anchor で終わる Entity Statement の並びである。OP が上の図の RP を検証する場合は次のように組み立てる。</p>
+<ol>
+<li>RP の Entity Configuration を取得し、<code>authority_hints</code> から上位（Intermediate）を知る</li>
+<li>Intermediate の Entity Configuration から <code>federation_fetch_endpoint</code> を知り、RP についての Subordinate Statement を取得する</li>
+<li>同じ手順で、Trust Anchor が Intermediate について発行した Subordinate Statement を取得する</li>
+<li>Trust Anchor の鍵（事前に持っているもの）から下に向かって署名を検証する。各ステートメントは、1 つ上のステートメントの <code>jwks</code> にある鍵で署名されている</li>
+<li>どれか 1 つでも署名、有効期限、<code>iss</code> と <code>sub</code> のつながりが合わなければ、そのエンティティは信頼しない</li>
+</ol>
+<p>Trust Anchor の鍵さえ持っていれば、初めて見る RP でも鍵とメタデータを確かめられる。チェーンの組み立てを任せる <code>federation_resolve_endpoint</code> もある。</p>
+
+<h3 id="metadata-policy">メタデータポリシー</h3>
+<p>上位のエンティティは、Subordinate Statement の <code>metadata_policy</code> で配下のメタデータを制約できる。演算子は <code>value</code>、<code>add</code>、<code>default</code>、<code>one_of</code>、<code>subset_of</code>、<code>superset_of</code>、<code>essential</code> である。たとえば Trust Anchor が「クライアント認証は <code>private_key_jwt</code> のみ」と決めると、配下の RP 全員に効く（作例）。</p>
+<pre><code class="language-json">"metadata_policy": {
+  "openid_relying_party": {
+    "token_endpoint_auth_method": { "one_of": ["private_key_jwt"] },
+    "grant_types": { "subset_of": ["authorization_code", "refresh_token"] }
+  }
+}
+</code></pre>
+<p>Leaf のメタデータに、上位から順にポリシーを適用した結果が、実際に使うメタデータになる。ポリシーに合わないメタデータを持つエンティティは信頼しない。</p>
+
+<h3 id="fed-registration">クライアント登録</h3>
+<table>
+<thead><tr><th>方式</th><th>やり方</th></tr></thead>
+<tbody>
+<tr><td>自動登録（<code>automatic</code>）</td><td>事前登録をしない。RP は自分の <strong>Entity Identifier を <code>client_id</code></strong> として、署名付きのリクエストオブジェクトで認可リクエストを送る。OP はその場でトラストチェーンを解決して RP を検証する。クライアントシークレットは使えず、<code>private_key_jwt</code> などの非対称鍵によるクライアント認証が必須になる</td></tr>
+<tr><td>明示的登録（<code>explicit</code>）</td><td>RP が自分の Entity Configuration（またはトラストチェーン）を OP の <code>federation_registration_endpoint</code> に POST する。OP はチェーンを検証して <code>client_id</code> を発行する</td></tr>
+</tbody>
+</table>
+
+<h3 id="trust-marks">トラストマーク</h3>
+<p><strong>トラストマーク</strong>は、エンティティが一定の基準を満たしていることを、認定機関（Trust Mark Issuer）が示す署名付き JWT である（<code>typ</code> は <code>trust-mark+jwt</code>）。Entity Configuration の <code>trust_marks</code> に載せる。たとえば「セキュリティ監査に合格した」「このプロファイルに準拠している」といった表明に使い、OP は特定のトラストマークを持つ RP だけを受け入れる、といった判断ができる。失効したかどうかは発行者の <code>federation_trust_mark_status_endpoint</code> で確かめる。</p>
+
+<h3 id="fed-when">使いどころ</h3>
+<ul>
+<li><strong>向いている</strong>: 多数の組織の RP と OP が相互に接続する連携（学術機関の連合、公的サービスの連携など）。参加・脱退を運営者側の署名だけで管理できる</li>
+<li><strong>不要</strong>: 自社の SPA と自社の IdP（Keycloak など）をつなぐ、あるいは少数の外部 IdP とつなぐ構成。通常のクライアント登録とディスカバリで足りる</li>
+</ul>
+
 <h2 id="mistakes">よくある誤り</h2>
 <ul>
 <li><strong>ID トークンを API に送る</strong>: ID トークンの <code>aud</code> はクライアントであり API ではない。API にはアクセストークンを送る</li>
@@ -149,12 +263,14 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
 <li>検証は署名、<code>iss</code>、<code>aud</code>、<code>exp</code>、<code>nonce</code> の順。ユーザーのキーは <code>iss</code> + <code>sub</code></li>
 <li>設定はディスカバリから取り、公開鍵は JWKS から取る。鍵ローテーションに備える</li>
 <li>ログアウトはアプリ、トークン、IdP の 3 層で行う</li>
+<li>OpenID Federation は、Trust Anchor を起点とするトラストチェーンで、事前登録なしに RP と OP が互いを信頼する仕組みである</li>
 </ul>
 <h3 id="refs">根拠とした仕様</h3>
 <ul>
 <li><a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core 1.0</a></li>
 <li><a href="https://openid.net/specs/openid-connect-discovery-1_0.html">OpenID Connect Discovery 1.0</a></li>
 <li><a href="https://openid.net/specs/openid-connect-rpinitiated-1_0.html">OpenID Connect RP-Initiated Logout 1.0</a></li>
+<li><a href="https://openid.net/specs/openid-federation-1_0.html">OpenID Federation 1.0</a></li>
 <li><a href="https://datatracker.ietf.org/doc/html/rfc7009">RFC 7009 OAuth 2.0 Token Revocation</a></li>
 </ul>
 </article>
