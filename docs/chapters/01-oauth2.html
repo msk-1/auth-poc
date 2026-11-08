@@ -32,7 +32,7 @@
 </section>
 
 <div class="page-body">
-  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#client-types">クライアントの種別</a></li><li><a href="#endpoints">エンドポイント</a></li><li><a href="#grants">グラントタイプ</a><ul><li><a href="#deprecated">使わないグラント</a></li></ul></li><li><a href="#tokens">トークン</a><ul><li><a href="#format">トークンの形式</a></li></ul></li><li><a href="#scope-aud">スコープと audience</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
+  <aside class="page-toc" aria-label="このページの目次"><p class="toc-title">目次</p><ul><li><a href="#client-types">クライアントの種別</a></li><li><a href="#endpoints">エンドポイント</a></li><li><a href="#grants">グラントタイプ</a><ul><li><a href="#deprecated">使わないグラント</a></li></ul></li><li><a href="#tokens">トークン</a><ul><li><a href="#format">トークンの形式</a></li></ul></li><li><a href="#at-rt">アクセストークンとリフレッシュトークン</a><ul><li><a href="#why-two">なぜ 2 つに分けるのか</a></li><li><a href="#lifecycle">時間の流れで見る</a></li><li><a href="#compare-at-rt">2 つのトークンの比較</a></li><li><a href="#rt-binding">盗まれた RT を使わせない</a></li><li><a href="#rotation-flow">ローテーションと再利用検知</a></li></ul></li><li><a href="#scope-aud">スコープと audience</a></li><li><a href="#summary">まとめ</a><ul><li><a href="#refs">根拠とした仕様</a></li></ul></li></ul></aside>
   <main class="content">
 <article>
 <p>OAuth 2.0 は、<strong>範囲と期限を限ったアクセストークン</strong>をクライアントに発行する仕組みである。SPA で使うグラントは、<strong>認可コード + PKCE</strong> と<strong>リフレッシュトークン</strong>の 2 つだけである。</p>
@@ -111,6 +111,112 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
 </table>
 <p>クライアントはアクセストークンの中身を読まない。形式は認可サーバーと API の間の取り決めであり、クライアントから見ると単なる文字列である。</p>
 
+<h2 id="at-rt">アクセストークンとリフレッシュトークン</h2>
+<h3 id="why-two">なぜ 2 つに分けるのか</h3>
+<p>トークンが 1 種類しかないと、次の 2 つの要求がぶつかる。</p>
+<ul>
+<li><strong>漏れたときの被害を小さくしたい</strong> → 寿命を短くしたい</li>
+<li><strong>ユーザーに何度もログインさせたくない</strong> → 寿命を長くしたい</li>
+</ul>
+<p>OAuth 2.0 は、役割の違う 2 つのトークンに分けてこれを両立させる。<strong>頻繁に送るものは短命にし、長く持つものはめったに送らない</strong>、という分担である。</p>
+<ul>
+<li><strong>アクセストークン</strong>: API を呼ぶたびに送る。送り先が多く、露出する機会も多い。だから寿命を短く（数分〜十数分）する</li>
+<li><strong>リフレッシュトークン</strong>: アクセストークンが切れたときに、<strong>認可サーバーのトークンエンドポイントにだけ</strong>送る。露出する機会が少ないので、寿命を長くできる</li>
+</ul>
+
+<h3 id="lifecycle">時間の流れで見る</h3>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 270" role="img" aria-label="アクセストークンは短い間隔で更新され、リフレッシュトークンが失効するとそれ以上更新できなくなる">
+  <defs><marker id="lc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <text class="xp-text" x="20" y="76">アクセス</text>
+  <text class="xp-text" x="20" y="94">トークン</text>
+  <text class="xp-text" x="20" y="166">リフレッシュ</text>
+  <text class="xp-text" x="20" y="184">トークン</text>
+  <text class="xp-small" x="355" y="40" text-anchor="middle">API を呼ぶたびに送る</text>
+  <rect class="xp-box" x="160" y="62" width="120" height="36" rx="6"/>
+  <text class="xp-text" x="220" y="85" text-anchor="middle">AT1（15 分）</text>
+  <rect class="xp-box" x="290" y="62" width="120" height="36" rx="6"/>
+  <text class="xp-text" x="350" y="85" text-anchor="middle">AT2（15 分）</text>
+  <rect class="xp-box" x="420" y="62" width="120" height="36" rx="6"/>
+  <text class="xp-text" x="480" y="85" text-anchor="middle">AT3（15 分）</text>
+  <rect class="xp-hot" x="160" y="152" width="390" height="36" rx="6"/>
+  <text class="xp-text" x="355" y="175" text-anchor="middle">RT（認可サーバーにだけ送る）</text>
+  <path class="xp-line" d="M290 152V100" marker-end="url(#lc-arrow)"/>
+  <text class="xp-small" x="296" y="130">更新</text>
+  <path class="xp-line" d="M420 152V100" marker-end="url(#lc-arrow)"/>
+  <text class="xp-small" x="426" y="130">更新</text>
+  <path class="xp-dash" d="M555 50V215"/>
+  <text class="xp-warn" x="565" y="85">AT を更新できない</text>
+  <text class="xp-warn" x="565" y="175">失効 → 再ログイン</text>
+  <path class="xp-line" d="M160 225H740" marker-end="url(#lc-arrow)"/>
+  <text class="xp-small" x="740" y="248" text-anchor="end">時間</text>
+  <text class="xp-small" x="555" y="248" text-anchor="middle">管理者による失効、ユーザーの無効化など</text>
+</svg>
+<figcaption>失効の効き目は、残っているアクセストークンの寿命（最大 15 分）までしか遅れない。アクセストークンを短くする理由はここにある。</figcaption>
+</figure>
+<p>リフレッシュトークンを使うたびに、認可サーバーは「このユーザーとクライアントは、まだ許可されたままか」を確かめ直す。管理者がアクセスを取り消したり、ユーザーを無効にしたりすると、<strong>次の更新で新しいアクセストークンが出なくなる</strong>。手元に残ったアクセストークンも、長くて数分で切れる。</p>
+
+<h3 id="compare-at-rt">2 つのトークンの比較</h3>
+<table>
+<thead><tr><th>観点</th><th>アクセストークン</th><th>リフレッシュトークン</th></tr></thead>
+<tbody>
+<tr><td>送り先</td><td>Web API（複数あり得る）</td><td>認可サーバーのトークンエンドポイントだけ</td></tr>
+<tr><td>送る頻度</td><td>API を呼ぶたび</td><td>アクセストークンが切れたときだけ</td></tr>
+<tr><td>寿命の目安</td><td>5〜15 分</td><td>数時間〜数十日</td></tr>
+<tr><td>誰が検証するか</td><td>API。JWT なら認可サーバーに問い合わせずに検証する</td><td>発行した認可サーバー自身。毎回、自分の記録と照合する</td></tr>
+<tr><td>期限前の失効</td><td>JWT では効きにくい（期限まで使える）</td><td>即座に効く</td></tr>
+<tr><td>クライアントとの結び付き</td><td>なし（Bearer）</td><td>発行先のクライアントに結び付く。Confidential client はクライアント認証が要る</td></tr>
+</tbody>
+</table>
+<p>リフレッシュトークンは寿命が長い代わりに、<strong>使われるたびに発行元が直接チェックできる</strong>。アクセストークンは検証が API 側で完結して速い代わりに、<strong>止められないので短くしておく</strong>。両者は互いの弱点を補い合っている。</p>
+
+<h3 id="rt-binding">盗まれたリフレッシュトークンを使わせない仕組み</h3>
+<p>リフレッシュトークンは寿命が長いぶん、盗まれたときの被害が大きい。そのため、RFC 6749 は、認可サーバーにリフレッシュトークンと発行先クライアントの結び付きを保つことを求めている。クライアントの種類によって守り方が変わる。</p>
+<ul>
+<li><strong>Confidential client（BFF など）</strong>: 更新のときにクライアント認証（client_secret、<code>private_key_jwt</code> など）が要る。リフレッシュトークンだけを盗んでも、クライアントの資格情報がなければ使えない</li>
+<li><strong>Public client（ブラウザ内の SPA など）</strong>: 資格情報がないので、トークンだけで使えてしまう。RFC 9700 は、<strong>ローテーション</strong>か<strong>送信者制約</strong>（<a href="06-threats.html#dpop">DPoP</a> など）のどちらかを求めている</li>
+</ul>
+
+<h3 id="rotation-flow">ローテーションと再利用検知</h3>
+<p>ローテーションでは、リフレッシュトークンを<strong>使うたびに新しいものと交換</strong>し、古いものは使用済みにする。使用済みのトークンがもう一度使われたら、<strong>正規のクライアントか攻撃者のどちらかが古いトークンを持っている</strong>、つまり盗まれたと判断できる。認可サーバーはどちらが正規かを区別できないので、その系列のトークンをまとめて失効させる。</p>
+<figure class="xp-figure">
+<svg viewBox="0 0 760 390" role="img" aria-label="リフレッシュトークンのローテーションで、盗まれた古いトークンの再利用を検知し、系列ごと失効させる流れ">
+  <defs><marker id="rr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="xp-arrow" d="M0 0L10 5L0 10z"/></marker></defs>
+  <rect class="xp-box" x="50" y="16" width="160" height="44" rx="8"/>
+  <text class="xp-text" x="130" y="43" text-anchor="middle">正規のクライアント</text>
+  <rect class="xp-hot" x="300" y="16" width="160" height="44" rx="8"/>
+  <text class="xp-text" x="380" y="43" text-anchor="middle">認可サーバー</text>
+  <rect class="xp-box" x="550" y="16" width="160" height="44" rx="8"/>
+  <text class="xp-text" x="630" y="43" text-anchor="middle">攻撃者</text>
+  <path class="xp-dash" d="M130 60V376"/>
+  <path class="xp-dash" d="M380 60V376"/>
+  <path class="xp-dash" d="M630 60V376"/>
+  <text class="xp-small" x="640" y="92">RT1 を盗む</text>
+  <path class="xp-line" d="M130 120H376" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="255" y="112" text-anchor="middle">① RT1 で更新</text>
+  <path class="xp-line" d="M380 155H134" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="255" y="147" text-anchor="middle">AT2 + RT2（RT1 は使用済み）</text>
+  <path class="xp-line" d="M630 205H384" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="505" y="197" text-anchor="middle">② 盗んだ RT1 で更新</text>
+  <text class="xp-warn" x="392" y="232">使用済みの RT1 → 盗まれたと判断</text>
+  <text class="xp-warn" x="392" y="250">RT2 も含めて系列ごと失効</text>
+  <path class="xp-line" d="M380 280H626" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="505" y="272" text-anchor="middle">拒否（invalid_grant）</text>
+  <path class="xp-line" d="M130 320H376" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="255" y="312" text-anchor="middle">③ RT2 で更新</text>
+  <path class="xp-line" d="M380 355H134" marker-end="url(#rr-arrow)"/>
+  <text class="xp-small" x="255" y="347" text-anchor="middle">拒否 → 再ログインを求める</text>
+</svg>
+<figcaption>攻撃者が先に RT1 を使った場合も同じである。その後に正規のクライアントが RT1 を使った時点で再利用が検知され、攻撃者が得た RT2 も失効する。</figcaption>
+</figure>
+<p>ローテーションは盗難を<strong>防ぐ</strong>のではなく、<strong>検知して被害を止める</strong>仕組みである。攻撃者は、検知されるまでの間はアクセストークンを得られる。そのため、次の対策と組み合わせる。</p>
+<ul>
+<li><strong>絶対的な有効期限</strong>: 更新を続けても、最初のログインから一定時間（例: 24 時間）で必ず切れるようにする</li>
+<li><strong>アイドルタイムアウト</strong>: 一定時間使われなかったリフレッシュトークンを失効させる</li>
+<li><strong>送信者制約</strong>: DPoP で鍵に結び付け、トークンだけを持ち出しても使えないようにする（<a href="06-threats.html#dpop">06 章</a>）</li>
+<li><strong>ブラウザに置かない</strong>: BFF ならリフレッシュトークンはサーバーにあり、XSS で盗まれない（<a href="04-spa-patterns.html">04 章</a>）</li>
+</ul>
+
 <h2 id="scope-aud">スコープと audience</h2>
 <ul>
 <li><strong>スコープ</strong>: トークンが許す操作の範囲。認可リクエストの <code>scope</code> パラメータで要求する（例: <code>orders:read orders:write</code>）。<strong>必要最小限</strong>だけ要求する</li>
@@ -123,6 +229,8 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9...
 <li>SPA は Public client である。シークレットを持たず、PKCE を使う</li>
 <li>SPA で使うグラントは認可コード + PKCE とリフレッシュトークンだけ。Implicit と Password は使わない</li>
 <li>アクセストークンは短命の Bearer トークン。<code>Authorization</code> ヘッダーで送る</li>
+<li>アクセストークンは短命で API に頻繁に送り、リフレッシュトークンは長命だが認可サーバーにだけ送る。失効は更新のときに効く</li>
+<li>Public client のリフレッシュトークンは、ローテーションか送信者制約で守る</li>
 <li>スコープはクライアントの権限、audience は宛先。ユーザーごとの権限確認は API が行う</li>
 </ul>
 <h3 id="refs">根拠とした仕様</h3>
